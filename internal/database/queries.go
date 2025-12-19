@@ -33,15 +33,30 @@ func SaveEmails(pool *pgxpool.Pool, emails []models.Email) error {
 	return nil
 }
 
-// GetAllEmails gets all emails sorted by newest first
-func GetAllEmails(pool *pgxpool.Pool) ([]models.Email, error) {
+// GetAllEmails gets all emails with optional sorting
+func GetAllEmails(pool *pgxpool.Pool, sortBy string) ([]models.Email, error) {
 	ctx := context.Background()
 
-	query := `
+	// Determine sort order
+	var orderClause string
+	switch sortBy {
+	case "date_newest":
+		orderClause = "ORDER BY date_received DESC"
+	case "date_oldest":
+		orderClause = "ORDER BY date_received ASC"
+	case "sender_asc":
+		orderClause = "ORDER BY from_address ASC"
+	case "sender_desc":
+		orderClause = "ORDER BY from_address DESC"
+	default:
+		orderClause = "ORDER BY created_at DESC"
+	}
+
+	query := fmt.Sprintf(`
 	SELECT id, from_address, subject, body, date_received
 	FROM emails
-	ORDER BY created_at DESC
-	`
+	%s
+	`, orderClause)
 
 	rows, err := pool.Query(ctx, query)
 	if err != nil {
@@ -62,18 +77,33 @@ func GetAllEmails(pool *pgxpool.Pool) ([]models.Email, error) {
 	return emails, nil
 }
 
-// GetEmailsBySender gets all emails from a specific sender
-func GetEmailsBySender(pool *pgxpool.Pool, sender string) ([]models.Email, error) {
+// GetEmailsByFrom retrieves emails from a specific sender with sorting
+func GetEmailsByFrom(pool *pgxpool.Pool, fromAddress string, sortBy string) ([]models.Email, error) {
 	ctx := context.Background()
 
-	query := `
+	// Determine sort order
+	var orderClause string
+	switch sortBy {
+	case "date_newest":
+		orderClause = "ORDER BY date_received DESC"
+	case "date_oldest":
+		orderClause = "ORDER BY date_received ASC"
+	case "sender_asc":
+		orderClause = "ORDER BY from_address ASC"
+	case "sender_desc":
+		orderClause = "ORDER BY from_address DESC"
+	default:
+		orderClause = "ORDER BY created_at DESC"
+	}
+
+	query := fmt.Sprintf(`
 	SELECT id, from_address, subject, body, date_received
 	FROM emails
 	WHERE from_address LIKE $1
-	ORDER BY created_at DESC
-	`
+	%s
+	`, orderClause)
 
-	rows, err := pool.Query(ctx, query, "%"+sender+"%")
+	rows, err := pool.Query(ctx, query, "%"+fromAddress+"%")
 	if err != nil {
 		return nil, fmt.Errorf("error querying emails: %v", err)
 	}
@@ -82,7 +112,13 @@ func GetEmailsBySender(pool *pgxpool.Pool, sender string) ([]models.Email, error
 	var emails []models.Email
 	for rows.Next() {
 		var email models.Email
-		err := rows.Scan(&email.ID, &email.From, &email.Subject, &email.Body, &email.Date)
+		err := rows.Scan(
+			&email.ID,
+			&email.From,
+			&email.Subject,
+			&email.Body,
+			&email.Date,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("error scanning email: %v", err)
 		}
@@ -90,6 +126,11 @@ func GetEmailsBySender(pool *pgxpool.Pool, sender string) ([]models.Email, error
 	}
 
 	return emails, nil
+}
+
+// GetEmailsBySender gets all emails from a specific sender with sorting
+func GetEmailsBySender(pool *pgxpool.Pool, sender string, sortBy string) ([]models.Email, error) {
+	return GetEmailsByFrom(pool, sender, sortBy)
 }
 
 // GetAllSenders gets a list of unique senders
@@ -119,42 +160,6 @@ func GetAllSenders(pool *pgxpool.Pool) ([]string, error) {
 	}
 
 	return senders, nil
-}
-
-// GetEmailsByFrom retrieves emails from a specific sender
-func GetEmailsByFrom(pool *pgxpool.Pool, fromAddress string) ([]models.Email, error) {
-	ctx := context.Background()
-
-	query := `
-	SELECT id, from_address, subject, body, date_received
-	FROM emails
-	WHERE from_address LIKE $1
-	ORDER BY created_at DESC
-	`
-
-	rows, err := pool.Query(ctx, query, "%"+fromAddress+"%")
-	if err != nil {
-		return nil, fmt.Errorf("error querying emails: %v", err)
-	}
-	defer rows.Close()
-
-	var emails []models.Email
-	for rows.Next() {
-		var email models.Email
-		err := rows.Scan(
-			&email.ID,
-			&email.From,
-			&email.Subject,
-			&email.Body,
-			&email.Date,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("error scanning email: %v", err)
-		}
-		emails = append(emails, email)
-	}
-
-	return emails, nil
 }
 
 // DeleteEmail deletes a single email by ID

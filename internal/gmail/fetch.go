@@ -103,5 +103,5 @@ func FetchEmails(client *http.Client, maxResults int64) ([]models.Email, error) 
 
 // FetchAllEmails is a convenience function to fetch all emails
 func FetchAllEmails(client *http.Client) ([]models.Email, error) {
-	return FetchEmails(client, 100)
+	return FetchEmails(client, 0)
 }

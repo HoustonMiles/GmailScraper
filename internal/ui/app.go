@@ -25,7 +25,9 @@ type App struct {
 	emailList   *components.EmailList
 	emailView   *components.EmailView
 	senderList  *widget.Select
-	viewMode    string // "all" or "sender"
+	sortSelect  *widget.Select  // ADD THIS
+	viewMode    string
+	sortBy      string  // ADD THIS
 }
 
 func NewApp(db *pgxpool.Pool, gmailClient *http.Client) *App {
@@ -34,6 +36,7 @@ func NewApp(db *pgxpool.Pool, gmailClient *http.Client) *App {
 		db:          db,
 		gmailClient: gmailClient,
 		viewMode:    "all",
+		sortBy:      "date_newest",  // ADD THIS - default sort
 	}
 	
 	a.mainWindow = a.fyneApp.NewWindow("Gmail Manager")
@@ -62,20 +65,42 @@ func (a *App) setupUI() {
 	a.senderList = widget.NewSelect(senderOptions, func(selected string) {
 		if selected == "All Emails" {
 			a.viewMode = "all"
-			a.emailList.LoadAllEmails()
+			a.emailList.LoadAllEmails(a.sortBy)
 		} else {
 			a.viewMode = "sender"
-			a.emailList.LoadEmailsBySender(selected)
+			a.emailList.LoadEmailsBySender(selected, a.sortBy)
 		}
 	})
 	a.senderList.SetSelected("All Emails")
 	
+	// Sort dropdown
+	a.sortSelect = widget.NewSelect(
+		[]string{"Newest First", "Oldest First", "Sender A-Z", "Sender Z-A"},
+		func(selected string) {
+			switch selected {
+			case "Newest First":
+				a.sortBy = "date_newest"
+			case "Oldest First":
+				a.sortBy = "date_oldest"
+			case "Sender A-Z":
+				a.sortBy = "sender_asc"
+			case "Sender Z-A":
+				a.sortBy = "sender_desc"
+			}
+			a.refreshView()
+		},
+	)
+	a.sortSelect.SetSelected("Newest First")
+	
 	// Create toolbar
 	toolbar := a.createToolbar()
 	
+	// Wrap email list in scroll container
+	emailScroll := container.NewScroll(a.emailList.Container)
+	
 	// Create split view
 	split := container.NewHSplit(
-		a.emailList.Container,
+		emailScroll,         // CHANGED: wrap in scroll
 		a.emailView.Container,
 	)
 	split.SetOffset(0.4)
@@ -112,8 +137,10 @@ func (a *App) createToolbar() *fyne.Container {
 		syncBtn,
 		deleteBtn,
 		refreshBtn,
-		widget.NewLabel("Filter by sender:"),
+		widget.NewLabel("Filter:"),
 		a.senderList,
+		widget.NewLabel("Sort:"),  // ADD THIS
+		a.sortSelect,              // ADD THIS
 	)
 }
 
@@ -123,7 +150,7 @@ func (a *App) syncEmails() {
 	progress.Show()
 	
 	go func() {
-		err := handlers.SyncEmails(a.gmailClient, a.db, 50) // Fetch 50 at a time
+		err := handlers.SyncEmails(a.gmailClient, a.db, 0) // Fetch 50 at a time
 		progress.Hide()
 		
 		if err != nil {
@@ -167,11 +194,11 @@ func (a *App) refreshView() {
 		a.senderList.Refresh()
 	}
 	
-	// Reload email list
+	// Reload email list with current sort
 	if a.viewMode == "all" {
-		a.emailList.LoadAllEmails()
+		a.emailList.LoadAllEmails(a.sortBy)
 	} else if a.senderList.Selected != "All Emails" {
-		a.emailList.LoadEmailsBySender(a.senderList.Selected)
+		a.emailList.LoadEmailsBySender(a.senderList.Selected, a.sortBy)
 	}
 }
 

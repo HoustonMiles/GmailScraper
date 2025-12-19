@@ -1,8 +1,8 @@
 package components
 
 import (
-	"fmt"
 	"log"
+	"sort"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -13,94 +13,85 @@ import (
 )
 
 type EmailList struct {
-	Container  *fyne.Container
-	db         *pgxpool.Pool
-	emailView  *EmailView
-	emails     []models.Email
-	list       *widget.List
-	checkboxes map[int]*widget.Check
-	app        interface{} // Reference to parent app for refresh
+	Container    *fyne.Container
+	db           *pgxpool.Pool
+	emailView    *EmailView
+	senderGroups []*SenderGroup
+	app          interface{}
 }
 
 func NewEmailList(db *pgxpool.Pool, emailView *EmailView, app interface{}) *EmailList {
 	el := &EmailList{
-		db:         db,
-		emailView:  emailView,
-		emails:     []models.Email{},
-		checkboxes: make(map[int]*widget.Check),
-		app:        app,
+		db:           db,
+		emailView:    emailView,
+		senderGroups: []*SenderGroup{},
+		app:          app,
 	}
-	
-	el.list = widget.NewList(
-		func() int {
-			return len(el.emails)
-		},
-		func() fyne.CanvasObject {
-			check := widget.NewCheck("", nil)
-			label := widget.NewLabel("Template")
-			return container.NewBorder(nil, nil, check, nil, label)
-		},
-		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			c := obj.(*fyne.Container)
-			check := c.Objects[0].(*widget.Check)
-			label := c.Objects[1].(*widget.Label)
-			
-			email := el.emails[id]
-			label.SetText(fmt.Sprintf("%s - %s", email.From, email.Subject))
-			
-			// Store checkbox reference
-			el.checkboxes[id] = check
-			
-			// Clear previous callback
-			check.OnChanged = nil
-			check.Checked = false
-			check.Refresh()
-		},
-	)
-	
-	el.list.OnSelected = func(id widget.ListItemID) {
-		el.emailView.ShowEmail(el.emails[id])
-	}
-	
-	el.Container = container.NewBorder(
-		widget.NewLabel("Emails"),
-		nil, nil, nil,
-		el.list,
-	)
-	
-	el.LoadAllEmails()
-	
+
+	el.Container = container.NewVBox()
+	el.LoadAllEmails("date_newest")
+
 	return el
 }
 
-func (el *EmailList) LoadAllEmails() {
-	emails, err := database.GetAllEmails(el.db)
+func (el *EmailList) LoadAllEmails(sortBy string) {
+	emails, err := database.GetAllEmails(el.db, sortBy)
 	if err != nil {
 		log.Printf("Error loading emails: %v", err)
 		return
 	}
-	el.emails = emails
-	el.checkboxes = make(map[int]*widget.Check)
-	el.list.Refresh()
+
+	el.groupAndDisplay(emails)
 }
 
-func (el *EmailList) LoadEmailsBySender(sender string) {
-	emails, err := database.GetEmailsByFrom(el.db, sender)
+func (el *EmailList) LoadEmailsBySender(sender string, sortBy string) {
+	emails, err := database.GetEmailsByFrom(el.db, sender, sortBy)
 	if err != nil {
 		log.Printf("Error loading emails: %v", err)
 		return
 	}
-	el.emails = emails
-	el.checkboxes = make(map[int]*widget.Check)
-	el.list.Refresh()
+
+	el.groupAndDisplay(emails)
+}
+
+func (el *EmailList) groupAndDisplay(emails []models.Email) {
+	// Group emails by sender
+	grouped := make(map[string][]models.Email)
+	for _, email := range emails {
+		grouped[email.From] = append(grouped[email.From], email)
+	}
+
+	// Clear existing groups
+	el.senderGroups = []*SenderGroup{}
+	el.Container.Objects = []fyne.CanvasObject{}
+
+	// Sort senders alphabetically
+	senders := make([]string, 0, len(grouped))
+	for sender := range grouped {
+		senders = append(senders, sender)
+	}
+	sort.Strings(senders)
+
+	// Create a sender group for each sender
+	for _, sender := range senders {
+		senderEmails := grouped[sender]
+		group := NewSenderGroup(sender, senderEmails, el.emailView)
+		el.senderGroups = append(el.senderGroups, group)
+		
+		el.Container.Add(group.Container)
+		el.Container.Add(widget.NewSeparator())
+	}
+
+	// WRAP IN MAIN THREAD
+	fyne.CurrentApp().Driver().DoInMainThread(func() {
+		el.Container.Refresh()
+	})
 }
 
 func (el *EmailList) GetSelectedIDs() []string {
-	var selectedIDs []string
-	for idx, check := range el.checkboxes {
-		if check.Checked {
-			selectedIDs = append(selectedIDs, el.emails[idx].ID)
-		}
+	var allSelected []string
+	for _, group := range el.senderGroups {
+		allSelected = append(allSelected, group.GetSelectedIDs()...)
 	}
-	return selectedIDs
+	return allSelected
 }
