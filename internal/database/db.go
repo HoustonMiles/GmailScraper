@@ -10,18 +10,16 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// InitDB initializes the database connection pool
 func InitDB() (*pgxpool.Pool, error) {
 	// Load .env file
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("Warning: .env file not found, using environment variables")
+		log.Println("Warning: .env file not found")
 	}
 
-	// Get connection string from environment
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
-		return nil, fmt.Errorf("DATABASE_URL environment variable not set")
+		connStr = "postgres://myappuser:password@localhost:5432/gmailscraper?sslmode=disable"
 	}
 
 	config, err := pgxpool.ParseConfig(connStr)
@@ -34,7 +32,6 @@ func InitDB() (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("unable to create connection pool: %v", err)
 	}
 
-	// Test the connection
 	err = pool.Ping(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("unable to ping database: %v", err)
@@ -44,7 +41,6 @@ func InitDB() (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// CreateTables creates the necessary database tables
 func CreateTables(pool *pgxpool.Pool) error {
 	ctx := context.Background()
 

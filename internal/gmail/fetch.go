@@ -10,7 +10,8 @@ import (
 	"google.golang.org/api/option"
 )
 
-// FetchEmails retrieves emails from Gmail
+// FetchEmails retrieves emails from Gmail with optional limit
+// If maxResults is 0, it fetches ALL emails (with pagination)
 func FetchEmails(client *http.Client, maxResults int64) ([]models.Email, error) {
 	ctx := context.Background()
 
@@ -20,44 +21,87 @@ func FetchEmails(client *http.Client, maxResults int64) ([]models.Email, error) 
 		return nil, fmt.Errorf("unable to create Gmail service: %v", err)
 	}
 
-	// Get emails
+	var allEmails []models.Email
+	pageToken := ""
 	user := "me"
-	r, err := srv.Users.Messages.List(user).MaxResults(maxResults).Do()
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve messages: %v", err)
-	}
 
-	var emails []models.Email
+	// If maxResults is 0, fetch ALL emails
+	fetchAll := maxResults == 0
+	
+	for {
+		// Gmail API max is 500 per request
+		batchSize := int64(500)
+		if !fetchAll && maxResults < 500 {
+			batchSize = maxResults
+		}
 
-	// Process each message
-	for _, msg := range r.Messages {
-		message, err := srv.Users.Messages.Get(user, msg.Id).Format("full").Do()
+		// Build the request
+		req := srv.Users.Messages.List(user).MaxResults(batchSize)
+		if pageToken != "" {
+			req = req.PageToken(pageToken)
+		}
+
+		// Execute the request
+		r, err := req.Do()
 		if err != nil {
-			fmt.Printf("Unable to retrieve message %s: %v\n", msg.Id, err)
-			continue
+			return nil, fmt.Errorf("unable to retrieve messages: %v", err)
 		}
 
-		email := models.Email{
-			ID: msg.Id,
-		}
+		fmt.Printf("Fetched %d message IDs (total so far: %d)...\n", len(r.Messages), len(allEmails)+len(r.Messages))
 
-		// Extract headers
-		for _, header := range message.Payload.Headers {
-			switch header.Name {
-			case "From":
-				email.From = header.Value
-			case "Subject":
-				email.Subject = header.Value
-			case "Date":
-				email.Date = header.Value
+		// Process each message
+		for _, msg := range r.Messages {
+			message, err := srv.Users.Messages.Get(user, msg.Id).Format("full").Do()
+			if err != nil {
+				fmt.Printf("Unable to retrieve message %s: %v\n", msg.Id, err)
+				continue
+			}
+
+			email := models.Email{
+				ID: msg.Id,
+			}
+
+			// Extract headers
+			for _, header := range message.Payload.Headers {
+				switch header.Name {
+				case "From":
+					email.From = header.Value
+				case "Subject":
+					email.Subject = header.Value
+				case "Date":
+					email.Date = header.Value
+				}
+			}
+
+			// Extract body (simplified - gets snippet)
+			email.Body = message.Snippet
+
+			allEmails = append(allEmails, email)
+
+			// If we have a specific limit and reached it, stop
+			if !fetchAll && int64(len(allEmails)) >= maxResults {
+				return allEmails, nil
 			}
 		}
 
-		// Extract body (simplified - gets snippet)
-		email.Body = message.Snippet
+		// Check if there are more pages
+		pageToken = r.NextPageToken
+		if pageToken == "" {
+			// No more pages
+			break
+		}
 
-		emails = append(emails, email)
+		// If not fetching all and we got enough, stop
+		if !fetchAll && int64(len(allEmails)) >= maxResults {
+			break
+		}
 	}
 
-	return emails, nil
+	fmt.Printf("Finished fetching. Total emails: %d\n", len(allEmails))
+	return allEmails, nil
+}
+
+// FetchAllEmails is a convenience function to fetch all emails
+func FetchAllEmails(client *http.Client) ([]models.Email, error) {
+	return FetchEmails(client, 100)
 }

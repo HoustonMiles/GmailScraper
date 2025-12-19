@@ -8,12 +8,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// SaveEmails saves a batch of emails to the database
+// SaveEmails saves emails to database
 func SaveEmails(pool *pgxpool.Pool, emails []models.Email) error {
 	ctx := context.Background()
 
 	for _, email := range emails {
-		// Use UPSERT to avoid duplicate key errors
 		query := `
 		INSERT INTO emails (id, from_address, subject, body, date_received)
 		VALUES ($1, $2, $3, $4, $5)
@@ -24,14 +23,7 @@ func SaveEmails(pool *pgxpool.Pool, emails []models.Email) error {
 			date_received = EXCLUDED.date_received
 		`
 
-		_, err := pool.Exec(ctx, query,
-			email.ID,
-			email.From,
-			email.Subject,
-			email.Body,
-			email.Date,
-		)
-
+		_, err := pool.Exec(ctx, query, email.ID, email.From, email.Subject, email.Body, email.Date)
 		if err != nil {
 			return fmt.Errorf("error saving email %s: %v", email.ID, err)
 		}
@@ -41,7 +33,7 @@ func SaveEmails(pool *pgxpool.Pool, emails []models.Email) error {
 	return nil
 }
 
-// GetAllEmails retrieves all emails from the database
+// GetAllEmails gets all emails sorted by newest first
 func GetAllEmails(pool *pgxpool.Pool) ([]models.Email, error) {
 	ctx := context.Background()
 
@@ -60,13 +52,7 @@ func GetAllEmails(pool *pgxpool.Pool) ([]models.Email, error) {
 	var emails []models.Email
 	for rows.Next() {
 		var email models.Email
-		err := rows.Scan(
-			&email.ID,
-			&email.From,
-			&email.Subject,
-			&email.Body,
-			&email.Date,
-		)
+		err := rows.Scan(&email.ID, &email.From, &email.Subject, &email.Body, &email.Date)
 		if err != nil {
 			return nil, fmt.Errorf("error scanning email: %v", err)
 		}
@@ -74,6 +60,65 @@ func GetAllEmails(pool *pgxpool.Pool) ([]models.Email, error) {
 	}
 
 	return emails, nil
+}
+
+// GetEmailsBySender gets all emails from a specific sender
+func GetEmailsBySender(pool *pgxpool.Pool, sender string) ([]models.Email, error) {
+	ctx := context.Background()
+
+	query := `
+	SELECT id, from_address, subject, body, date_received
+	FROM emails
+	WHERE from_address LIKE $1
+	ORDER BY created_at DESC
+	`
+
+	rows, err := pool.Query(ctx, query, "%"+sender+"%")
+	if err != nil {
+		return nil, fmt.Errorf("error querying emails: %v", err)
+	}
+	defer rows.Close()
+
+	var emails []models.Email
+	for rows.Next() {
+		var email models.Email
+		err := rows.Scan(&email.ID, &email.From, &email.Subject, &email.Body, &email.Date)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning email: %v", err)
+		}
+		emails = append(emails, email)
+	}
+
+	return emails, nil
+}
+
+// GetAllSenders gets a list of unique senders
+func GetAllSenders(pool *pgxpool.Pool) ([]string, error) {
+	ctx := context.Background()
+
+	query := `
+	SELECT DISTINCT from_address
+	FROM emails
+	ORDER BY from_address
+	`
+
+	rows, err := pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("error querying senders: %v", err)
+	}
+	defer rows.Close()
+
+	var senders []string
+	for rows.Next() {
+		var sender string
+		err := rows.Scan(&sender)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning sender: %v", err)
+		}
+		senders = append(senders, sender)
+	}
+
+	return senders, nil
 }
 
 // GetEmailsByFrom retrieves emails from a specific sender
@@ -110,4 +155,56 @@ func GetEmailsByFrom(pool *pgxpool.Pool, fromAddress string) ([]models.Email, er
 	}
 
 	return emails, nil
+}
+
+// DeleteEmail deletes a single email by ID
+func DeleteEmail(pool *pgxpool.Pool, emailID string) error {
+	ctx := context.Background()
+
+	query := `DELETE FROM emails WHERE id = $1`
+	
+	result, err := pool.Exec(ctx, query, emailID)
+	if err != nil {
+		return fmt.Errorf("error deleting email: %v", err)
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("email not found")
+	}
+
+	fmt.Printf("Deleted email: %s\n", emailID)
+	return nil
+}
+
+// DeleteEmails deletes multiple emails by their IDs
+func DeleteEmails(pool *pgxpool.Pool, emailIDs []string) error {
+	ctx := context.Background()
+
+	for _, id := range emailIDs {
+		query := `DELETE FROM emails WHERE id = $1`
+		_, err := pool.Exec(ctx, query, id)
+		if err != nil {
+			return fmt.Errorf("error deleting email %s: %v", id, err)
+		}
+	}
+
+	fmt.Printf("Deleted %d emails\n", len(emailIDs))
+	return nil
+}
+
+// DeleteEmailsBySender deletes all emails from a specific sender
+func DeleteEmailsBySender(pool *pgxpool.Pool, sender string) error {
+	ctx := context.Background()
+
+	query := `DELETE FROM emails WHERE from_address LIKE $1`
+	
+	result, err := pool.Exec(ctx, query, "%"+sender+"%")
+	if err != nil {
+		return fmt.Errorf("error deleting emails: %v", err)
+	}
+
+	rowsAffected := result.RowsAffected()
+	fmt.Printf("Deleted %d emails from %s\n", rowsAffected, sender)
+	return nil
 }
