@@ -1,6 +1,7 @@
 # OAuth credentials
 credentials.json
 token.json
+.env
 
 # Go build files
 *.exe

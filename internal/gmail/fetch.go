@@ -2,47 +2,62 @@ package gmail
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
-	"os"
-	"gmailScraper/internal/models"
+	"net/http"
 
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
+	"github.com/HoustonMiles/gmailScraper/internal/models"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
 )
 
-func FetchEmail(client *gmail.Service) ([]models.Email, error) {
+// FetchEmails retrieves emails from Gmail
+func FetchEmails(client *http.Client, maxResults int64) ([]models.Email, error) {
+	ctx := context.Background()
+
 	// Create Gmail service
 	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
-		log.Fatalf("Unable to create Gmail service: %v", err)
+		return nil, fmt.Errorf("unable to create Gmail service: %v", err)
 	}
 
 	// Get emails
 	user := "me"
-	r, err := srv.Users.Messages.List(user).MaxResults(10).Do()
+	r, err := srv.Users.Messages.List(user).MaxResults(maxResults).Do()
 	if err != nil {
-		log.Fatalf("Unable to retrieve messages: %v", err)
+		return nil, fmt.Errorf("unable to retrieve messages: %v", err)
 	}
 
-	var senders []string
+	var emails []models.Email
 
-	// Print email details
+	// Process each message
 	for _, msg := range r.Messages {
-		message, err := srv.Users.Messages.Get(user, msg.Id).Do()
+		message, err := srv.Users.Messages.Get(user, msg.Id).Format("full").Do()
 		if err != nil {
-			log.Fatalf("Unable to retrieve message %s: %v", msg.Id, err)
+			fmt.Printf("Unable to retrieve message %s: %v\n", msg.Id, err)
 			continue
 		}
-		//fmt.Printf("%s", msg)
+
+		email := models.Email{
+			ID: msg.Id,
+		}
+
+		// Extract headers
 		for _, header := range message.Payload.Headers {
-			if header.Name == "From" {
-				senders = append(senders, header.Value)
-				break
+			switch header.Name {
+			case "From":
+				email.From = header.Value
+			case "Subject":
+				email.Subject = header.Value
+			case "Date":
+				email.Date = header.Value
 			}
 		}
+
+		// Extract body (simplified - gets snippet)
+		email.Body = message.Snippet
+
+		emails = append(emails, email)
 	}
+
+	return emails, nil
 }

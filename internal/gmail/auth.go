@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/gmail/v1"
-	"google.golang.org/api/option"
 )
 
-func GetClient() {
+func GetClient() (*http.Client, error) {
 	ctx := context.Background()
 
 	// Read credentials.json file
@@ -36,7 +36,7 @@ func GetClient() {
 		saveToken(tokFile, tok)
 	}
 
-	client := config.Client(ctx, tok)
+	return config.Client(ctx, tok), nil
 }
 
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {

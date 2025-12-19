@@ -1,113 +1,56 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/gmail/v1"
-	"google.golang.org/api/option"
+	"github.com/HoustonMiles/gmailScraper/internal/database"
+	"github.com/HoustonMiles/gmailScraper/internal/gmail"
 )
 
 func main() {
-	ctx := context.Background()
-
-	// Read credentials.json file
-	b, err := os.ReadFile("credentials.json")
+	// Initialize database
+	db, err := database.InitDB()
 	if err != nil {
-		log.Fatalf("Unable to read credentials.json: %v", err)
+		log.Fatal(err)
 	}
+	defer db.Close()
 
-	// Create OAuth config
-	config, err := google.ConfigFromJSON(b, gmail.GmailReadonlyScope)
+	// Create tables if they don't exist
+	err = database.CreateTables(db)
 	if err != nil {
-		log.Fatalf("Unable to parse credentials: %v", err)
+		log.Fatal(err)
 	}
 
-	// Get token
-	tokFile := "token.json"
-	tok, err := tokenFromFile(tokFile)
+	// Get Gmail client
+	client, err := gmail.GetClient()
 	if err != nil {
-		tok = getTokenFromWeb(config)
-		saveToken(tokFile, tok)
+		log.Fatal(err)
 	}
 
-	client := config.Client(ctx, tok)
-
-	// Create Gmail service
-	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
+	// Fetch emails
+	fmt.Println("Fetching emails from Gmail...")
+	emails, err := gmail.FetchEmails(client, 10)
 	if err != nil {
-		log.Fatalf("Unable to create Gmail service: %v", err)
+		log.Fatal(err)
 	}
 
-	// Get first email
-	user := "me"
-	r, err := srv.Users.Messages.List(user).MaxResults(10).Do()
+	fmt.Printf("Fetched %d emails\n", len(emails))
+
+	// Save to database
+	err = database.SaveEmails(db, emails)
 	if err != nil {
-		log.Fatalf("Unable to retrieve messages: %v", err)
+		log.Fatal(err)
 	}
 
-	var senders []string
-
-	// Print email details
-	for _, msg := range r.Messages {
-		message, err := srv.Users.Messages.Get(user, msg.Id).Do()
-		if err != nil {
-			log.Fatalf("Unable to retrieve message %s: %v", msg.Id, err)
-			continue
-		}
-		//fmt.Printf("%s", msg)
-		for _, header := range message.Payload.Headers {
-			if header.Name == "From" {
-				senders = append(senders, header.Value)
-				break
-			}
-		}
-	}
-
-	for _, sender := range senders {
-		fmt.Println(sender)
-	}
-}
-
-func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Go to this link in your browser:\n%v\n\n", authURL)
-	fmt.Print("Enter authorization code: ")
-
-	var authCode string
-	if _, err := fmt.Scan(&authCode); err != nil {
-		log.Fatalf("Unable to read authorization code: %v", err)
-	}
-
-	tok, err := config.Exchange(context.TODO(), authCode)
+	// Display emails from database
+	fmt.Println("\nEmails in database:")
+	dbEmails, err := database.GetAllEmails(db)
 	if err != nil {
-		log.Fatalf("Unable to retrieve token: %v", err)
+		log.Fatal(err)
 	}
-	return tok
-}
 
-func tokenFromFile(file string) (*oauth2.Token, error) {
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, err
+	for i, email := range dbEmails {
+		fmt.Printf("%d. From: %s | Subject: %s\n", i+1, email.From, email.Subject)
 	}
-	defer f.Close()
-	tok := &oauth2.Token{}
-	err = json.NewDecoder(f).Decode(tok)
-	return tok, err
-}
-
-func saveToken(path string, token *oauth2.Token) {
-	fmt.Printf("Saving token to: %s\n", path)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		log.Fatalf("Unable to cache token: %v", err)
-	}
-	defer f.Close()
-	json.NewEncoder(f).Encode(token)
 }
