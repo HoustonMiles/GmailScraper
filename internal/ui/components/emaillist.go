@@ -82,10 +82,7 @@ func (el *EmailList) groupAndDisplay(emails []models.Email) {
 		el.Container.Add(widget.NewSeparator())
 	}
 
-	// WRAP IN MAIN THREAD
-	fyne.CurrentApp().Driver().DoInMainThread(func() {
-		el.Container.Refresh()
-	})
+	el.Container.Refresh()
 }
 
 func (el *EmailList) GetSelectedIDs() []string {
