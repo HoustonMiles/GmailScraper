@@ -46,29 +46,31 @@ func main() {
 
 	// Get first email
 	user := "me"
-	r, err := srv.Users.Messages.List(user).MaxResults(1).Do()
+	r, err := srv.Users.Messages.List(user).MaxResults(10).Do()
 	if err != nil {
 		log.Fatalf("Unable to retrieve messages: %v", err)
 	}
 
-	if len(r.Messages) == 0 {
-		fmt.Println("No messages found.")
-		return
-	}
-
-	// Get full message details
-	msg, err := srv.Users.Messages.Get(user, r.Messages[0].Id).Do()
-	if err != nil {
-		log.Fatalf("Unable to retrieve message: %v", err)
-	}
+	var senders []string
 
 	// Print email details
-	fmt.Println("First Email:")
-	fmt.Println("ID:", msg.Id)
-	for _, header := range msg.Payload.Headers {
-		if header.Name == "From" || header.Name == "Subject" || header.Name == "Date" {
-			fmt.Printf("%s: %s\n", header.Name, header.Value)
+	for _, msg := range r.Messages {
+		message, err := srv.Users.Messages.Get(user, msg.Id).Do()
+		if err != nil {
+			log.Fatalf("Unable to retrieve message %s: %v", msg.Id, err)
+			continue
 		}
+		//fmt.Printf("%s", msg)
+		for _, header := range message.Payload.Headers {
+			if header.Name == "From" {
+				senders = append(senders, header.Value)
+				break
+			}
+		}
+	}
+
+	for _, sender := range senders {
+		fmt.Println(sender)
 	}
 }
 
